@@ -16,9 +16,9 @@ confidence = st.slider("Confidence Threshold", 0.1, 1.0, 0.5, step=0.05)
 
 # Load model based on selection
 if model_option == "YOLOv8":
-    model = YOLO("models/yolov8n.pt")  # เปลี่ยนเป็น path ของโมเดลคุณ
+    model = YOLO("models/yolo.pt")  # เปลี่ยนเป็น path ของโมเดลคุณ
 elif model_option == "Faster R-CNN":
-    model = load_faster_rcnn_model("models/fasterrcnn.pth")
+    model = load_faster_rcnn_model("models/FasterRCNN.pth")
 
 # === UPLOAD ===
 uploaded_file = st.file_uploader("อัปโหลดรูปเหรียญ", type=["jpg", "jpeg", "png"])
