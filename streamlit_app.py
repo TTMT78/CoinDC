@@ -4,8 +4,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
-# โหลดโมเดล
-model = YOLO("model.pt")  # เปลี่ยนเป็น path ที่ถูกต้อง
+# โหลดโมเดล (แก้ path ให้ตรงกับโมเดลของคุณ)
+model = YOLO("model.pt")
 
 st.title("🪙 ตรวจจับเหรียญจากภาพ")
 
@@ -13,33 +13,37 @@ st.title("🪙 ตรวจจับเหรียญจากภาพ")
 uploaded_file = st.file_uploader("อัปโหลดรูปภาพ", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # แสดงภาพ
-    image = Image.open(uploaded_file)
-    st.image(image, caption='รูปที่อัปโหลด', use_column_width=True)
+    # แปลงภาพเป็น OpenCV
+    image = Image.open(uploaded_file).convert("RGB")
+    image_np = np.array(image)
 
-    # ทำงานกับโมเดล
     with st.spinner("🔍 กำลังประมวลผล..."):
-        image_np = np.array(image)
-        results = model(image_np)[0]  # รัน YOLO
-        
-        # แสดงผลลัพธ์
+        # รันโมเดล
+        results = model(image_np)[0]
+
+        # วาดกล่องผลลัพธ์
+        image_with_boxes = results.plot()  # ได้เป็น NumPy image ที่มีกรอบแล้ว
+
+        # แสดงภาพที่มีกรอบ
+        st.image(image_with_boxes, caption="🔍 ผลลัพธ์หลังตรวจจับ", channels="BGR", use_column_width=True)
+
+        # นับเหรียญ
         boxes = results.boxes
         class_ids = boxes.cls.cpu().numpy()
-        
-        # นับเหรียญและคำนวณมูลค่า
-        coin_count = len(class_ids)
+
         value_map = {
-            0: 1,  # 1 บาท
-            1: 2,  # 2 บาท
+            0: 1,
+            1: 2,
             2: 5,
             3: 10
         }
         total_value = sum([value_map.get(int(c), 0) for c in class_ids])
-        
-        # แสดงผล
+        coin_count = len(class_ids)
+
         st.success(f"🔢 ตรวจพบ {coin_count} เหรียญ")
         st.success(f"💰 รวมมูลค่า: {total_value} บาท")
 
-        # แยกตามประเภท
+        # แสดงแต่ละชนิด
         for coin_class, count in zip(*np.unique(class_ids, return_counts=True)):
-            st.write(f"เหรียญ {value_map.get(int(coin_class), '?')} บาท: {count} เหรียญ")
+            coin_value = value_map.get(int(coin_class), "?")
+            st.write(f"เหรียญ {coin_value} บาท: {count} เหรียญ")
