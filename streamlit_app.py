@@ -13,12 +13,18 @@ COIN_VALUES = {'1บาท': 1, '2บาท': 2, '5บาท': 5, '10บาท':
 
 # ---------- FUNCTIONS ----------
 def load_faster_rcnn_model(model_path):
-    num_classes = 7  # 6 coins + background
+    num_classes = 7  # 6 coin classes + background
     model = fasterrcnn_resnet50_fpn(pretrained=False)
+    
+    # แก้ Predictor ให้ตรงกับจำนวนคลาส
     in_features = model.roi_heads.box_predictor.cls_score.in_features
-    model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, num_classes)
-    model.load_state_dict(torch.load(model_path, map_location='cpu'))
-    model.eval()
+    model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(
+        in_features, num_classes)
+
+    # โหลดน้ำหนักเข้า model
+    state_dict = torch.load(model_path, map_location='cpu')
+    model.load_state_dict(state_dict)
+    model.eval()  # เปลี่ยนเป็น eval mode
     return model
 
 def draw_boxes(image, boxes, labels):
@@ -69,7 +75,7 @@ if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
     
     if model_type == "YOLOv8":
-        model = YOLO("models/yolov8.pt")
+        model = YOLO("models/yolo.pt")
         boxes, labels = predict_yolo(image, model, conf_thres)
     elif model_type == "Faster R-CNN":
         model = load_faster_rcnn_model("models/FasterRCNN.pth")
