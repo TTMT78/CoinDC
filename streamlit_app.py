@@ -1,39 +1,45 @@
 import streamlit as st
-import torch
 from ultralytics import YOLO
-import numpy as np
 import cv2
-import os
-import requests
+import numpy as np
+from PIL import Image
 
-# URL ของโมเดลบน GitHub (เปลี่ยนเป็นลิงก์ไฟล์จริง)
-MODEL_URL = "https://github.com/username/repo/raw/main/model.pt"
-MODEL_PATH = "model.pt"
+# โหลดโมเดล
+model = YOLO("model.pt")  # เปลี่ยนเป็น path ที่ถูกต้อง
 
-# โหลดโมเดลจาก GitHub ถ้าไม่มีไฟล์
-if not os.path.exists(MODEL_PATH):
-    st.write("📥 Downloading model...")
-    response = requests.get(MODEL_URL)
-    with open(MODEL_PATH, "wb") as f:
-        f.write(response.content)
-    st.write("✅ Model downloaded!")
+st.title("🪙 ตรวจจับเหรียญจากภาพ")
 
-# โหลดโมเดล YOLO
-model = YOLO(MODEL_PATH)
-
-st.title("💰 ระบบนับเหรียญจากภาพ")
-st.write("อัปโหลดภาพเหรียญ แล้วให้ AI ช่วยนับจำนวนและคำนวณมูลค่ารวม")
-
-# อัปโหลดไฟล์ภาพ
-uploaded_file = st.file_uploader("📷 อัปโหลดภาพ", type=["jpg", "png", "jpeg"])
+# อัปโหลดภาพ
+uploaded_file = st.file_uploader("อัปโหลดรูปภาพ", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # อ่านภาพ
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    # แสดงภาพ
+    image = Image.open(uploaded_file)
+    st.image(image, caption='รูปที่อัปโหลด', use_column_width=True)
 
-    # รันโมเดล YOLO
-    results = model(image)
+    # ทำงานกับโมเดล
+    with st.spinner("🔍 กำลังประมวลผล..."):
+        image_np = np.array(image)
+        results = model(image_np)[0]  # รัน YOLO
+        
+        # แสดงผลลัพธ์
+        boxes = results.boxes
+        class_ids = boxes.cls.cpu().numpy()
+        
+        # นับเหรียญและคำนวณมูลค่า
+        coin_count = len(class_ids)
+        value_map = {
+            0: 1,  # 1 บาท
+            1: 2,  # 2 บาท
+            2: 5,
+            3: 10
+        }
+        total_value = sum([value_map.get(int(c), 0) for c in class_ids])
+        
+        # แสดงผล
+        st.success(f"🔢 ตรวจพบ {coin_count} เหรียญ")
+        st.success(f"💰 รวมมูลค่า: {total_value} บาท")
 
-    # แสดงผลลัพธ์
-    st.image(image, channels="BGR")
+        # แยกตามประเภท
+        for coin_class, count in zip(*np.unique(class_ids, return_counts=True)):
+            st.write(f"เหรียญ {value_map.get(int(coin_class), '?')} บาท: {count} เหรียญ")
