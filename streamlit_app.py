@@ -1,73 +1,88 @@
 import streamlit as st
-from PIL import Image
 import torch
-from ultralytics import YOLO
-import torchvision.transforms as T
+import torchvision
+from torchvision.models.detection import fasterrcnn_resnet50_fpn
+from torchvision.transforms import functional as F
+from PIL import Image, ImageDraw, ImageFont
 import numpy as np
-import cv2
+from ultralytics import YOLO
 
-# === CONFIG ===
-coin_labels = ['1฿', '2฿', '5฿', '10฿', '0.5฿', '0.25฿']
-coin_values = [1, 2, 5, 10, 0.5, 0.25]
+# ---------- CONFIG ----------
+CLASS_NAMES = ['1บาท', '2บาท', '5บาท', '10บาท', '50สตางค์', '25สตางค์']
+COIN_VALUES = {'1บาท': 1, '2บาท': 2, '5บาท': 5, '10บาท': 10, '50สตางค์': 0.5, '25สตางค์': 0.25}
 
-# === MODEL SELECTION ===
-model_option = st.selectbox("เลือกโมเดล", ["YOLOv8", "Faster R-CNN"])
-confidence = st.slider("Confidence Threshold", 0.1, 1.0, 0.5, step=0.05)
+# ---------- FUNCTIONS ----------
+def load_faster_rcnn_model(model_path):
+    num_classes = 7  # 6 coins + background
+    model = fasterrcnn_resnet50_fpn(pretrained=False)
+    in_features = model.roi_heads.box_predictor.cls_score.in_features
+    model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, num_classes)
+    model.load_state_dict(torch.load(model_path, map_location='cpu'))
+    model.eval()
+    return model
 
-# Load model based on selection
-if model_option == "YOLOv8":
-    model = YOLO("models/yolo.pt")  # เปลี่ยนเป็น path ของโมเดลคุณ
-elif model_option == "Faster R-CNN":
-    model = load_faster_rcnn_model("models/FasterRCNN.pth")
+def draw_boxes(image, boxes, labels):
+    image = image.convert("RGB")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
 
-# === UPLOAD ===
-uploaded_file = st.file_uploader("อัปโหลดรูปเหรียญ", type=["jpg", "jpeg", "png"])
+    for box, label in zip(boxes, labels):
+        draw.rectangle(box.tolist(), outline="red", width=3)
+        draw.text((box[0], box[1]), label, fill="red", font=font)
+    return image
+
+def predict_yolo(image, model, conf_thres):
+    results = model.predict(image, conf=conf_thres)[0]
+    boxes = results.boxes.xyxy.cpu().numpy()
+    classes = results.boxes.cls.cpu().numpy().astype(int)
+    labels = [CLASS_NAMES[c] for c in classes]
+    return boxes, labels
+
+def predict_faster_rcnn(image, model, conf_thres):
+    transform = F.to_tensor(image)
+    with torch.no_grad():
+        outputs = model([transform])[0]
+    boxes = outputs['boxes']
+    scores = outputs['scores']
+    labels = outputs['labels']
+    keep = scores >= conf_thres
+    boxes = boxes[keep].cpu().numpy()
+    labels = labels[keep].cpu().numpy()
+    label_names = [CLASS_NAMES[l - 1] for l in labels]  # Subtract 1 since bg = 0
+    return boxes, label_names
+
+def calculate_totals(labels):
+    from collections import Counter
+    count = Counter(labels)
+    total = sum(COIN_VALUES[coin] * qty for coin, qty in count.items())
+    return count, total
+
+# ---------- STREAMLIT APP ----------
+st.title("🪙 Coin Detector App")
+st.markdown("อัปโหลดภาพเหรียญ ระบบจะตรวจจับประเภทและมูลค่าของเหรียญให้อัตโนมัติ")
+
+model_type = st.selectbox("เลือกโมเดลที่ต้องการใช้", ["YOLOv8", "Faster R-CNN"])
+conf_thres = st.slider("Confidence Threshold", min_value=0.1, max_value=1.0, value=0.5, step=0.05)
+
+uploaded_file = st.file_uploader("อัปโหลดภาพ", type=["jpg", "jpeg", "png"])
 if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
-    img_array = np.array(image)
-    st.image(image, caption="ภาพที่อัปโหลด", use_column_width=True)
+    
+    if model_type == "YOLOv8":
+        model = YOLO("models/yolov8.pt")
+        boxes, labels = predict_yolo(image, model, conf_thres)
+    elif model_type == "Faster R-CNN":
+        model = load_faster_rcnn_model("models/FasterRCNN.pth")
+        boxes, labels = predict_faster_rcnn(image, model, conf_thres)
 
-    if st.button("ตรวจจับเหรียญ"):
-        if model_option == "YOLOv8":
-            results = model(img_array)[0]
-            boxes = results.boxes.xyxy.cpu().numpy()
-            classes = results.boxes.cls.cpu().numpy().astype(int)
-            scores = results.boxes.conf.cpu().numpy()
-        else:
-            transform = T.Compose([T.ToTensor()])
-            with torch.no_grad():
-                predictions = model([transform(image)])[0]
-            boxes = predictions['boxes'].cpu().numpy()
-            scores = predictions['scores'].cpu().numpy()
-            classes = predictions['labels'].cpu().numpy()
+    if boxes is not None and labels:
+        result_img = draw_boxes(image.copy(), boxes, labels)
+        st.image(result_img, caption="ผลลัพธ์ที่ตรวจจับได้", use_column_width=True)
 
-        # Filter by confidence
-        filtered_boxes = []
-        filtered_classes = []
-        for box, cls, score in zip(boxes, classes, scores):
-            if score >= confidence:
-                filtered_boxes.append(box)
-                filtered_classes.append(cls)
-
-        # Visualization
-        result_img = img_array.copy()
-        counter = [0] * 6  # 6 coin types
-        for box, cls in zip(filtered_boxes, filtered_classes):
-            if cls == 0 or cls > 6:
-                continue  # background or unknown
-            label = coin_labels[cls - 1]  # subtract background
-            value = coin_values[cls - 1]
-            counter[cls - 1] += 1
-
-            x1, y1, x2, y2 = map(int, box)
-            cv2.rectangle(result_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(result_img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8, (0, 255, 0), 2)
-
-        total_value = sum([count * val for count, val in zip(counter, coin_values)])
-        st.image(result_img, caption="ผลลัพธ์", use_column_width=True)
-
-        st.markdown("### รายงานผล")
-        for label, count in zip(coin_labels, counter):
-            st.write(f"- {label}: {count} เหรียญ")
-        st.write(f"**รวมมูลค่า: {total_value:.2f} บาท**")
+        count, total = calculate_totals(labels)
+        st.subheader("🔍 สรุปผล")
+        for coin, qty in count.items():
+            st.write(f"{coin}: {qty} เหรียญ")
+        st.write(f"💰 รวมมูลค่า: **{total:.2f} บาท**")
+    else:
+        st.warning("ไม่พบเหรียญในภาพหรือ confidence ต่ำเกินไป")
