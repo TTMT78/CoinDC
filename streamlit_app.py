@@ -9,6 +9,9 @@ model = YOLO("model.pt")
 
 st.title("🪙 ตรวจจับเหรียญจากภาพ")
 
+# เพิ่มแถบสไลด์สำหรับปรับค่า confidence
+conf_threshold = st.slider("🔧 ปรับค่า Confidence Threshold", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+
 # อัปโหลดภาพ
 uploaded_file = st.file_uploader("อัปโหลดรูปภาพ", type=["jpg", "jpeg", "png"])
 
@@ -18,14 +21,14 @@ if uploaded_file is not None:
     image_np = np.array(image)
 
     with st.spinner("🔍 กำลังประมวลผล..."):
-        # รันโมเดล
-        results = model(image_np)[0]
+        # รันโมเดลพร้อม conf threshold
+        results = model(image_np, conf=conf_threshold)[0]
 
-        # วาดกล่องผลลัพธ์
-        image_with_boxes = results.plot()  # ได้เป็น NumPy image ที่มีกรอบแล้ว
+        # วาดกรอบ
+        image_with_boxes = results.plot()
 
         # แสดงภาพที่มีกรอบ
-        st.image(image_with_boxes, caption="🔍 ผลลัพธ์หลังตรวจจับ", channels="BGR", use_column_width=True)
+        st.image(image_with_boxes, caption="ผลลัพธ์หลังตรวจจับ", channels="BGR", use_column_width=True)
 
         # นับเหรียญ
         boxes = results.boxes
